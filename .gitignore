@@ -8,3 +8,6 @@ lcov.info
 .idea
 .vscode/*
 !.vscode/settings.json
+.obsidian/
+crosvm_architecture.png
+tpm_virtio_kernel_modules/

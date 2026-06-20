@@ -207,6 +207,7 @@ use crate::crosvm::ratelimit::Ratelimit;
 use crate::crosvm::sys::cmdline::DevicesCommand;
 use crate::crosvm::sys::config::SharedDir;
 use crate::crosvm::sys::config::SharedDirKind;
+use crate::crosvm::sys::linux::device_helpers::create_swtpm_device;
 use crate::crosvm::sys::platform::vcpu::VcpuPidTid;
 
 const KVM_PATH: &str = "/dev/kvm";
@@ -503,9 +504,17 @@ fn create_virtio_devices(
         info!("virtio-pvclock is enabled for this vm");
     }
 
+    if let Some(ref socket_path) = cfg.swtpm_socket {
+        devs.push(create_swtpm_device(
+            cfg.protection_type,
+            cfg.jail_config.as_ref(),
+            Path::new(socket_path),
+        )?);
+    }
     #[cfg(feature = "vtpm")]
     {
-        if cfg.vtpm_proxy {
+        // ChromeOS vtpm-proxy (requires D-Bus daemon)
+        if cfg.vtpm_proxy && cfg.swtpm_socket.is_none() {
             devs.push(create_vtpm_proxy_device(
                 cfg.protection_type,
                 cfg.jail_config.as_ref(),

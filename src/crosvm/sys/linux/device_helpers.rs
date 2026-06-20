@@ -44,6 +44,7 @@ use devices::virtio::pvclock::PvClock;
 use devices::virtio::scsi::ScsiOption;
 #[cfg(feature = "audio")]
 use devices::virtio::snd::parameters::Parameters as SndParameters;
+use devices::virtio::swtpm_backend::SwtpmBackend;
 use devices::virtio::vfio_wrapper::VfioWrapper;
 #[cfg(feature = "net")]
 use devices::virtio::vhost_user_backend::NetBackend;
@@ -507,6 +508,22 @@ pub fn create_vtpm_proxy_device(
     })
 }
 
+/// Creates a virtio TPM device using swtpm socket backend (for non-ChromeOS systems)
+pub fn create_swtpm_device(
+    protection_type: ProtectionType,
+    jail_config: Option<&JailConfig>,
+    socket_path: &Path,
+) -> DeviceResult {
+    let jail = simple_jail(jail_config, "tpm_device")?;
+
+    let backend = SwtpmBackend::new(socket_path).context("failed to connect to swtpm socket")?;
+
+    let dev = virtio::Tpm::new(Box::new(backend), virtio::base_features(protection_type));
+    Ok(VirtioDeviceStub {
+        dev: Box::new(dev),
+        jail,
+    })
+}
 pub fn create_single_touch_device<T: IntoUnixStream>(
     protection_type: ProtectionType,
     jail_config: Option<&JailConfig>,

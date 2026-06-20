@@ -19,8 +19,9 @@ pub mod net;
 pub mod pvclock;
 mod queue;
 mod rng;
+pub mod swtpm_backend;
 #[cfg(feature = "vtpm")]
-mod tpm;
+pub mod tpm;
 #[cfg(any(feature = "video-decoder", feature = "video-encoder"))]
 mod video;
 mod virtio_device;
@@ -43,6 +44,7 @@ pub mod vhost_user_backend;
 pub mod vhost_user_frontend;
 pub mod vsock;
 
+pub use swtpm_backend::SwtpmBackend;
 pub use vmm_vhost::SharedMemoryRegion;
 
 #[cfg(feature = "balloon")]

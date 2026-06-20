@@ -97,7 +97,7 @@ impl Worker {
         needs_interrupt
     }
 
-    fn run(mut self, kill_evt: Event) -> anyhow::Result<()> {
+    fn run(&mut self, kill_evt: Event) -> anyhow::Result<()> {
         #[derive(EventToken, Debug)]
         enum Token {
             // A request is ready on the queue.
@@ -134,7 +134,7 @@ impl Worker {
 /// Virtio vTPM device.
 pub struct Tpm {
     backend: Option<Box<dyn TpmBackend>>,
-    worker_thread: Option<WorkerThread<()>>,
+    worker_thread: Option<WorkerThread<Box<dyn TpmBackend>>>,
     features: u64,
 }
 
@@ -165,6 +165,13 @@ impl VirtioDevice for Tpm {
         self.features
     }
 
+    fn reset(&mut self) -> anyhow::Result<()> {
+        if let Some(worker_thread) = self.worker_thread.take() {
+            self.backend = Some(worker_thread.stop());
+        }
+        Ok(())
+    }
+
     fn activate(
         &mut self,
         _mem: GuestMemory,
@@ -178,12 +185,13 @@ impl VirtioDevice for Tpm {
 
         let backend = self.backend.take().context("no backend in vtpm")?;
 
-        let worker = Worker { queue, backend };
+        let mut worker = Worker { queue, backend };
 
         self.worker_thread = Some(WorkerThread::start("v_tpm", |kill_evt| {
             if let Err(e) = worker.run(kill_evt) {
                 error!("virtio-tpm worker failed: {:#}", e);
             }
+            worker.backend
         }));
 
         Ok(())

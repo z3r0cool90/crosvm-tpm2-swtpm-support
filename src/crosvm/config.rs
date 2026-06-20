@@ -756,6 +756,8 @@ pub struct Config {
     pub sve: Option<SveConfig>,
     pub swap_dir: Option<PathBuf>,
     pub swiotlb: Option<u64>,
+    /// Path to swtpm Unix socket for TPM emulation
+    pub swtpm_socket: Option<PathBuf>,
     #[cfg(target_os = "android")]
     pub task_profiles: Vec<String>,
     #[cfg(any(target_os = "android", target_os = "linux"))]
@@ -991,6 +993,7 @@ impl Default for Config {
             sve: None,
             swap_dir: None,
             swiotlb: None,
+            swtpm_socket: None,
             #[cfg(target_os = "android")]
             task_profiles: Vec::new(),
             #[cfg(any(target_os = "android", target_os = "linux"))]

@@ -2013,6 +2013,10 @@ pub struct RunCommand {
     /// path to a socket from where to read switch input events and write status updates to
     pub switches: Vec<PathBuf>,
 
+    #[argh(option)]
+    /// path to swtpm (https://github.com/stefanberger/swtpm) socket.
+    /// Works on any Linux host, not just ChromeOS.
+    pub swtpm_socket: Option<PathBuf>,
     #[argh(option, arg_name = "TAG")]
     /// (DEPRECATED): Use --syslog-tag before "run".
     /// when logging to syslog, use the provided tag
@@ -2669,14 +2673,12 @@ impl TryFrom<RunCommand> for super::config::Config {
         {
             cfg.vhost_scmi = cmd.vhost_scmi.unwrap_or_default();
         }
-
         #[cfg(feature = "vtpm")]
         {
             cfg.vtpm_proxy = cmd.vtpm_proxy.unwrap_or_default();
         }
-
+        cfg.swtpm_socket = cmd.swtpm_socket.clone();
         cfg.virtio_input = cmd.input;
-
         if !cmd.single_touch.is_empty() {
             log::warn!("`--single-touch` is deprecated; please use `--input single-touch[...]`");
             cfg.virtio_input
