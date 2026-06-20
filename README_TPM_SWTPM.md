@@ -14,7 +14,7 @@ This version of the report is based directly on `git diff` output against the un
 
 ## Solution Architecture
 
-!(crosvm_architecture.png)
+![arch](crosvm_architecture.png)
 
 ---
 
