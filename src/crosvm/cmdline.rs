@@ -2089,6 +2089,12 @@ pub struct RunCommand {
     /// vCPU threads
     pub task_profiles: Vec<String>,
 
+    #[cfg(feature = "vtpm")]
+    #[argh(option)]
+    /// path to a host TPM character device to pass through, e.g.
+    /// /dev/tpm0. Gives the guest direct access to the host TPM.
+    pub tpm_device: Option<PathBuf>,
+
     #[argh(
         option,
         arg_name = "[path=]PATH[,width=WIDTH][,height=HEIGHT][,name=NAME]",
@@ -2790,6 +2796,10 @@ impl TryFrom<RunCommand> for super::config::Config {
                 cfg.virtio_device_modules.push(
                     device_virtio_tpm::VirtioTpmModule::with_swtpm_socket(socket_path).into(),
                 );
+            }
+            if let Some(device_path) = cmd.tpm_device {
+                cfg.virtio_device_modules
+                    .push(device_virtio_tpm::VirtioTpmModule::with_host_device(device_path).into());
             }
         }
 
