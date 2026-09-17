@@ -9,6 +9,8 @@ use std::io;
 use std::io::Read;
 use std::io::Write;
 use std::ops::BitOrAssign;
+use std::path::Path;
+use std::path::PathBuf;
 
 use anyhow::anyhow;
 use anyhow::Context;
@@ -33,7 +35,9 @@ use remain::sorted;
 use thiserror::Error;
 use vm_memory::GuestMemory;
 
+mod swtpm_backend;
 mod vtpm_proxy;
+pub use self::swtpm_backend::SwtpmBackend;
 pub use self::vtpm_proxy::VtpmProxy;
 
 // A single queue of size 2. The guest kernel driver will enqueue a single
@@ -107,7 +111,7 @@ impl Worker {
         needs_interrupt
     }
 
-    fn run(mut self, kill_evt: Event) -> anyhow::Result<()> {
+    fn run(&mut self, kill_evt: Event) -> anyhow::Result<()> {
         #[derive(EventToken, Debug)]
         enum Token {
             // A request is ready on the queue.
@@ -144,7 +148,7 @@ impl Worker {
 /// Virtio vTPM device.
 pub struct Tpm {
     backend: Option<Box<dyn TpmBackend>>,
-    worker_thread: Option<WorkerThread<()>>,
+    worker_thread: Option<WorkerThread<Box<dyn TpmBackend>>>,
     features: u64,
 }
 
@@ -175,6 +179,13 @@ impl VirtioDevice for Tpm {
         self.features
     }
 
+    fn reset(&mut self) -> anyhow::Result<()> {
+        if let Some(worker_thread) = self.worker_thread.take() {
+            self.backend = Some(worker_thread.stop());
+        }
+        Ok(())
+    }
+
     fn activate(
         &mut self,
         _mem: GuestMemory,
@@ -188,12 +199,13 @@ impl VirtioDevice for Tpm {
 
         let backend = self.backend.take().context("no backend in vtpm")?;
 
-        let worker = Worker { queue, backend };
+        let mut worker = Worker { queue, backend };
 
         self.worker_thread = Some(WorkerThread::start("v_tpm", |kill_evt| {
             if let Err(e) = worker.run(kill_evt) {
                 error!("virtio-tpm worker failed: {:#}", e);
             }
+            worker.backend
         }));
 
         Ok(())
@@ -234,14 +246,33 @@ enum Error {
     Write(io::Error),
 }
 
+/// Which backend the virtio-tpm device talks to.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+pub enum TpmBackendConfig {
+    /// ChromeOS vtpm daemon, reached over D-Bus.
+    #[default]
+    VtpmProxy,
+    /// swtpm instance listening on a Unix socket.
+    SwtpmSocket(PathBuf),
+}
+
 /// Module for creating a Virtio TPM device.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
-pub struct VirtioTpmModule;
+pub struct VirtioTpmModule {
+    backend: TpmBackendConfig,
+}
 
 impl VirtioTpmModule {
-    /// Create a new VirtioTpmModule.
+    /// Create a new VirtioTpmModule backed by the vtpm daemon.
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    /// Create a new VirtioTpmModule backed by swtpm on `socket_path`.
+    pub fn with_swtpm_socket(socket_path: PathBuf) -> Self {
+        Self {
+            backend: TpmBackendConfig::SwtpmSocket(socket_path),
+        }
     }
 }
 
@@ -251,11 +282,11 @@ impl VirtioDeviceModule for VirtioTpmModule {
     }
 
     fn create(&self, args: &mut VirtioDeviceArgs<'_>) -> anyhow::Result<Box<dyn VirtioDevice>> {
-        let backend = VtpmProxy::new();
-        let dev = Tpm::new(
-            Box::new(backend),
-            virtio::base_features(args.protection_type),
-        );
+        let backend: Box<dyn TpmBackend> = match &self.backend {
+            TpmBackendConfig::VtpmProxy => Box::new(VtpmProxy::new()),
+            TpmBackendConfig::SwtpmSocket(path) => Box::new(SwtpmBackend::new(path)?),
+        };
+        let dev = Tpm::new(backend, virtio::base_features(args.protection_type));
         Ok(Box::new(dev))
     }
 
@@ -268,8 +299,15 @@ impl VirtioDeviceModule for VirtioTpmModule {
             jail::MAX_OPEN_FILES_DEFAULT,
             &config,
         )?;
-        let system_bus_socket_path = std::path::Path::new("/run/dbus/system_bus_socket");
-        jail.mount_bind(system_bus_socket_path, system_bus_socket_path, true)?;
+        match &self.backend {
+            TpmBackendConfig::VtpmProxy => {
+                let system_bus_socket_path = Path::new("/run/dbus/system_bus_socket");
+                jail.mount_bind(system_bus_socket_path, system_bus_socket_path, true)?;
+            }
+            TpmBackendConfig::SwtpmSocket(path) => {
+                jail.mount_bind(path, path, true)?;
+            }
+        }
         Ok(Some(jail))
     }
 }
