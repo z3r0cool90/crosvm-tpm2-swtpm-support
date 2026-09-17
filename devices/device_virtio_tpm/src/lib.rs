@@ -36,8 +36,10 @@ use thiserror::Error;
 use vm_memory::GuestMemory;
 
 mod swtpm_backend;
+mod tpm_passthrough_backend;
 mod vtpm_proxy;
 pub use self::swtpm_backend::SwtpmBackend;
+pub use self::tpm_passthrough_backend::TpmPassthroughBackend;
 pub use self::vtpm_proxy::VtpmProxy;
 
 // A single queue of size 2. The guest kernel driver will enqueue a single
@@ -254,6 +256,8 @@ pub enum TpmBackendConfig {
     VtpmProxy,
     /// swtpm instance listening on a Unix socket.
     SwtpmSocket(PathBuf),
+    /// Host TPM character device, e.g. /dev/tpm0, passed through directly.
+    HostDevice(PathBuf),
 }
 
 /// Module for creating a Virtio TPM device.
@@ -274,6 +278,13 @@ impl VirtioTpmModule {
             backend: TpmBackendConfig::SwtpmSocket(socket_path),
         }
     }
+
+    /// Create a new VirtioTpmModule that passes through the host TPM at `device_path`.
+    pub fn with_host_device(device_path: PathBuf) -> Self {
+        Self {
+            backend: TpmBackendConfig::HostDevice(device_path),
+        }
+    }
 }
 
 impl VirtioDeviceModule for VirtioTpmModule {
@@ -285,6 +296,7 @@ impl VirtioDeviceModule for VirtioTpmModule {
         let backend: Box<dyn TpmBackend> = match &self.backend {
             TpmBackendConfig::VtpmProxy => Box::new(VtpmProxy::new()),
             TpmBackendConfig::SwtpmSocket(path) => Box::new(SwtpmBackend::new(path)?),
+            TpmBackendConfig::HostDevice(path) => Box::new(TpmPassthroughBackend::new(path)?),
         };
         let dev = Tpm::new(backend, virtio::base_features(args.protection_type));
         Ok(Box::new(dev))
@@ -305,6 +317,9 @@ impl VirtioDeviceModule for VirtioTpmModule {
                 jail.mount_bind(system_bus_socket_path, system_bus_socket_path, true)?;
             }
             TpmBackendConfig::SwtpmSocket(path) => {
+                jail.mount_bind(path, path, true)?;
+            }
+            TpmBackendConfig::HostDevice(path) => {
                 jail.mount_bind(path, path, true)?;
             }
         }
